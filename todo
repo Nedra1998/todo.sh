@@ -2,10 +2,17 @@
 
 TODO_VERSION="0.1.0"
 
+# --- Environment Variables --- {{{
+
+TODO_DIR="${TODO_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/todo}"
+
+# }}}
+
 # --- Colors --- {{{
 
 if [ -t 1 ] && [ -z "${NO_COLOR+x}" ]; then
   RESET="\e[0m"
+  BOLD="\e[1m"
   BLACK="\e[30m"
   RED="\e[31m"
   GREEN="\e[32m"
@@ -16,6 +23,7 @@ if [ -t 1 ] && [ -z "${NO_COLOR+x}" ]; then
   WHITE="\e[37m"
 else
   RESET=""
+  BOLD=""
   BLACK=""
   RED=""
   GREEN=""
@@ -25,6 +33,29 @@ else
   CYAN=""
   WHITE=""
 fi
+
+# }}}
+# --- Default Arguments --- {{{
+
+_arg_command=""
+
+_arg_add_due=""
+_arg_add_priority=""
+_arg_add_tag=()
+_arg_add_project=()
+_arg_add_description=()
+
+_arg_delete_force=false
+_arg_delete_id=()
+
+_arg_done_move=true
+_arg_done_undo=false
+_arg_done_id=()
+
+_arg_edit_done=false
+
+_arg_list_all=false
+_arg_list_query=""
 
 # }}}
 # --- Help Message --- {{{
@@ -40,8 +71,82 @@ function print_help() {
   printf "  %b%-10s%b  %s\n" "$GREEN" "--version" "$RESET" "Show the version and exit."
   printf "  %b%-10s%b  %s\n" "$GREEN" "-h, --help" "$RESET" "Show this message and exit."
   printf "\n%bCommands:%b\n" "$YELLOW" "$RESET"
-  printf "  %b%-4s%b  %s\n" "$GREEN" "add" "$RESET" "Add a new task to the task list."
-  printf "  %b%-4s%b  %s\n" "$GREEN" "done" "$RESET" "Mark an open task as completed."
+  printf "  %b%-6s%b  %s\n" "$GREEN" "add" "$RESET" "Add a new task to the task list."
+  printf "  %b%-6s%b  %s\n" "$GREEN" "delete" "$RESET" "Permenently delete a task."
+  printf "  %b%-6s%b  %s\n" "$GREEN" "done" "$RESET" "Mark an open task as completed."
+  printf "  %b%-6s%b  %s\n" "$GREEN" "edit" "$RESET" "Open the todo list in your default editor."
+  printf "  %b%-6s%b  %s\n" "$GREEN" "list" "$RESET" "List tasks in the todo list."
+}
+
+function print_help_add() {
+  printf "%bUsage:%b %s add [OPTIONS] DESCRIPTION...\n" "$YELLOW" "$RESET" "$0"
+  printf "\n  %s\n" "Add a new task to the task list."
+  printf "\n%bArguments:%b\n" "$YELLOW" "$RESET"
+  printf "  %b%-14s%b  %s\n" "$GREEN" "DESCRIPTION..." "$RESET" "The description for the new task."
+  printf "\n%bOptions:%b\n" "$YELLOW" "$RESET"
+  printf "  %b%-20s%b  %s\n" "$GREEN" "-h, --help" "$RESET" "Show this message and exit."
+  printf "  %b%-20s%b  %s\n" "$GREEN" "-P, --pri CHARACTER" "$RESET" "The priority for the new task."
+  printf "  %b%-20s%b  %s\n" "$GREEN" "-t, --tag STRING" "$RESET" "Set a tag for the new task."
+  printf "  %b%-20s%b  %s\n" "$GREEN" "-p, --project STRING" "$RESET" "Set a project for the new task."
+  printf "  %b%-20s%b  %s\n" "$GREEN" "-d, --due DATE" "$RESET" "The due date to set for the new task."
+}
+
+function print_help_delete() {
+  printf "%bUsage:%b %s delete [OPTIONS] ID...\n" "$YELLOW" "$RESET" "$0"
+  printf "\n  %s\n" "Permenently delete a task."
+  printf "\n%bArguments:%b\n" "$YELLOW" "$RESET"
+  printf "  %b%-5s%b  %s\n" "$GREEN" "ID..." "$RESET" "The ID(s) of the tasks to delete."
+  printf "\n%bOptions:%b\n" "$YELLOW" "$RESET"
+  printf "  %b%-11s%b  %s\n" "$GREEN" "-h, --help" "$RESET" "Show this message and exit."
+  printf "  %b%-11s%b  %s\n" "$GREEN" "-f, --force" "$RESET" "Delete the task without confirmation."
+}
+
+function print_help_done() {
+  printf "%bUsage:%b %s done [OPTIONS] ID...\n" "$YELLOW" "$RESET" "$0"
+  printf "\n  %s\n" "Mark an open task as completed."
+  printf "\n%bArguments:%b\n" "$YELLOW" "$RESET"
+  printf "  %b%-5s%b  %s\n" "$GREEN" "ID..." "$RESET" "The ID(s) of the tasks to mark as completed."
+  printf "\n%bOptions:%b\n" "$YELLOW" "$RESET"
+  printf "  %b%-13s%b  %s\n" "$GREEN" "-h, --help" "$RESET" "Show this message and exit."
+  printf "  %b%-13s%b  %s\n" "$GREEN" "-M, --no-move" "$RESET" "Don't move the task to the dedicated done list."
+  printf "  %b%-13s%b  %s\n" "$GREEN" "-u, --undo" "$RESET" "Mark a completed task as open again."
+}
+
+function print_help_edit() {
+  printf "%bUsage:%b %s edit [OPTIONS]\n" "$YELLOW" "$RESET" "$0"
+  printf "\n  %s\n" "Open the todo list in your default editor."
+  printf "\n%bOptions:%b\n" "$YELLOW" "$RESET"
+  printf "  %b%-10s%b  %s\n" "$GREEN" "-h, --help" "$RESET" "Show this message and exit."
+  printf "  %b%-10s%b  %s\n" "$GREEN" "-d, --done" "$RESET" "Open the list of completed tasks."
+}
+
+function print_help_list() {
+  printf "%bUsage:%b %s list [OPTIONS] QUERY...\n" "$YELLOW" "$RESET" "$0"
+  printf "\n  %s\n" "List tasks in the todo list."
+  printf "\n%bArguments:%b\n" "$YELLOW" "$RESET"
+  printf "  %b%-8s%b  %s\n" "$GREEN" "QUERY..." "$RESET" "A search query to filter the tasks included in the list."
+  printf "\n%bOptions:%b\n" "$YELLOW" "$RESET"
+  printf "  %b%-10s%b  %s\n" "$GREEN" "-h, --help" "$RESET" "Show this message and exit."
+  printf "  %b%-10s%b  %s\n" "$GREEN" "-a, --all" "$RESET" "Include already completed tasks in to list."
+}
+
+# }}}
+# --- Argument Validators --- {{{
+
+function pchar() {
+  if ! printf "%s" "$1" | grep -q '^[a-zA-Z]$'; then
+    printf "%bERROR:%b The value of argument '%s' is '%s', which is not a character.\n" "$YELLOW" "$RESET" "$2" "$1" 1>&2
+    exit 1
+  fi
+  printf "%s" "$1" | tr '[:lower:]' '[:upper:]'
+}
+
+function pdate() {
+  if ! date --date "$1" &>/dev/null; then
+    printf "%bERROR:%b The value of argument '%s' is '%s', which is not a datetime.\n" "$YELLOW" "$RESET" "$2" "$1" 1>&2
+    exit 1
+  fi
+  date --date "$1" "+%Y-%m-%d"
 }
 
 # }}}
@@ -63,10 +168,640 @@ function parse_args() {
       print_version
       exit 0
       ;;
+    add | new)
+      _arg_command="add"
+      shift
+      parse_args_add "$@"
+      break
+      ;;
+    rm | del | delete)
+      _arg_command="delete"
+      shift
+      parse_args_delete "$@"
+      break
+      ;;
+    do | done)
+      _arg_command="done"
+      shift
+      parse_args_done "$@"
+      break
+      ;;
+    undo | undone)
+      _arg_command="done"
+      shift
+      parse_args_done "$@" --undo
+      break
+      ;;
+    edit)
+      _arg_command="edit"
+      shift
+      parse_args_edit "$@"
+      break
+      ;;
+    ls | list)
+      _arg_command="list"
+      shift
+      parse_args_list "$@"
+      break
+      ;;
+    *)
+      print_help
+      printf "%bGot an unexpected argument '%s'%b\n" "$RED" "$1" "$RESET"
+      exit 1
+      ;;
     esac
+    shift
   done
+}
+
+function parse_args_add() {
+  while test $# -gt 0; do
+    _key="$1"
+    case "$_key" in
+    -h | --help)
+      print_help_add
+      exit 0
+      ;;
+    -h*)
+      print_help_add
+      exit 0
+      ;;
+    -d | --due)
+      if [ $# -lt 2 ]; then
+        printf "%bMissing value for the optional argument '%s'%b\n" "$YELLOW" "$_key" "$RESET"
+        exit 1
+      fi
+      _arg_add_due="$(pdate "$2" "due")" || exit 1
+      shift
+      ;;
+    --due=*)
+      _arg_add_due="$(pdate "${_key##--due=}" "due")" || exit 1
+      ;;
+    -d*)
+      _arg_add_due="$(pdate "${_key##-d}" "due")" || exit 1
+      ;;
+    -P | --pri | --priority)
+      if [ $# -lt 2 ]; then
+        printf "%bMissing value for the optional argument '%s'%b\n" "$YELLOW" "$_key" "$RESET"
+        exit 1
+      fi
+      _arg_add_priority="$(pchar "$2" "priority")" || exit 1
+      shift
+      ;;
+    --priority=*)
+      _arg_add_priority="$(pchar "${_key##--priority=}" "priority")" || exit 1
+      ;;
+    --pri=*)
+      _arg_add_priority="$(pchar "${_key##--pri=}" "priority")" || exit 1
+      ;;
+    -P*)
+      _arg_add_priority="$(pchar "${_key##-P}" "priority")" || exit 1
+      ;;
+    -t | --tag)
+      if [ $# -lt 2 ]; then
+        printf "%bMissing value for the optional argument '%s'%b\n" "$YELLOW" "$_key" "$RESET"
+        exit 1
+      fi
+      _arg_add_tag+=("$2")
+      shift
+      ;;
+    --tag=*)
+      _arg_add_tag+=("${_key##--tag=}")
+      ;;
+    -t*)
+      _arg_add_tag+=("${_key##-t}")
+      ;;
+    -p | --proj | --project)
+      if [ $# -lt 2 ]; then
+        printf "%bMissing value for the optional argument '%s'%b\n" "$YELLOW" "$_key" "$RESET"
+        exit 1
+      fi
+      _arg_add_project+=("$2")
+      shift
+      ;;
+    --project=*)
+      _arg_add_project+=("${_key##--project=}")
+      ;;
+    --proj=*)
+      _arg_add_project+=("${_key##--proj=}")
+      ;;
+    -p*)
+      _arg_add_project+=("${_key##-p}")
+      ;;
+    -*)
+      print_help_add
+      printf "%bGot an unexpected argument '%s'%b\n" "$RED" "$1" "$RESET"
+      exit 1
+      ;;
+    *)
+      _arg_add_description+=("$_key")
+      ;;
+    esac
+    shift
+  done
+}
+
+function parse_args_delete() {
+  while test $# -gt 0; do
+    _key="$1"
+    case "$_key" in
+    -h | --help)
+      print_help_delete
+      exit 0
+      ;;
+    -h*)
+      print_help_delete
+      exit 0
+      ;;
+    -f | --force)
+      _arg_delete_force=true
+      ;;
+    -f*)
+      _arg_delete_force=true
+      _next="${_key##-f}"
+      if test -n "$_next" -a "$_next" != "$_key"; then
+        shift
+        set -- "-f" "-${_next}" "$@"
+      fi
+      ;;
+    -*)
+      print_help_delete
+      printf "%bGot an unexpected argument '%s'%b\n" "$RED" "$1" "$RESET"
+      exit 1
+      ;;
+    *)
+      _arg_delete_id+=("$_key")
+      ;;
+    esac
+    shift
+  done
+}
+
+function parse_args_done() {
+  while test $# -gt 0; do
+    _key="$1"
+    case "$_key" in
+    -h | --help)
+      print_help_done
+      exit 0
+      ;;
+    -h*)
+      print_help_done
+      exit 0
+      ;;
+    -M | --no-move)
+      _arg_done_move=false
+      ;;
+    -M*)
+      _arg_done_move=false
+      _next="${_key##-M}"
+      if test -n "$_next" -a "$_next" != "$_key"; then
+        shift
+        set -- "-M" "-${_next}" "$@"
+      fi
+      ;;
+    -u | --undo)
+      _arg_done_undo=true
+      ;;
+    -u*)
+      _arg_done_undo=true
+      _next="${_key##-u}"
+      if test -n "$_next" -a "$_next" != "$_key"; then
+        shift
+        set -- "-u" "-${_next}" "$@"
+      fi
+      ;;
+    -*)
+      print_help_list
+      printf "%bGot an unexpected argument '%s'%b\n" "$RED" "$1" "$RESET"
+      exit 1
+      ;;
+    *)
+      _arg_done_id+=("$_key")
+      ;;
+    esac
+    shift
+  done
+}
+
+function parse_args_edit() {
+  while test $# -gt 0; do
+    _key="$1"
+    case "$_key" in
+    -h | --help)
+      print_help_edit
+      exit 0
+      ;;
+    -h*)
+      print_help_edit
+      exit 0
+      ;;
+    -d | --done)
+      _arg_edit_done=true
+      ;;
+    -d*)
+      _arg_edit_done=true
+      _next="${_key##-d}"
+      if test -n "$_next" -a "$_next" != "$_key"; then
+        shift
+        set -- "-d" "-${_next}" "$@"
+      fi
+      ;;
+    *)
+      print_help_edit
+      printf "%bGot an unexpected argument '%s'%b\n" "$RED" "$1" "$RESET"
+      exit 1
+      ;;
+    esac
+    shift
+  done
+}
+
+function parse_args_list() {
+  while test $# -gt 0; do
+    _key="$1"
+    case "$_key" in
+    -h | --help)
+      print_help_list
+      exit 0
+      ;;
+    -h*)
+      print_help_list
+      exit 0
+      ;;
+    -a | --all)
+      _arg_list_all=true
+      ;;
+    -a*)
+      _arg_list_all=true
+      _next="${_key##-a}"
+      if test -n "$_next" -a "$_next" != "$_key"; then
+        shift
+        set -- "-a" "-${_next}" "$@"
+      fi
+      ;;
+    -*)
+      print_help_list
+      printf "%bGot an unexpected argument '%s'%b\n" "$RED" "$1" "$RESET"
+      exit 1
+      ;;
+    *)
+      _arg_list_query="$_arg_list_query $_key"
+      ;;
+    esac
+    shift
+  done
+}
+
+# }}}
+# --- Utility Function --- {{{
+
+function confirm() {
+  read -p "$1 [y/n]? " -n 1 -r
+  if [[ "$REPLY" =~ ^[Yy]$ ]]; then
+    printf "\n"
+    return 0
+  else
+    printf "\n"
+    return 1
+  fi
+}
+
+function highlight_priority() {
+  if [ "${1}" == "(A)" ]; then
+    priority="${BOLD}${RED}${1}${RESET}"
+  elif [ "${1}" == "(B)" ]; then
+    priority="${RED}${1}${RESET}"
+  elif [ "${1}" == "(C)" ]; then
+    priority="${YELLOW}${1}${RESET}"
+  elif [ "${1}" == "(D)" ]; then
+    priority="${MAGENTA}${1}${RESET}"
+  elif [ "${1}" == "(E)" ]; then
+    priority="${BLUE}${1}${RESET}"
+  elif [ "${1}" == "(F)" ]; then
+    priority="${CYAN}${1}${RESET}"
+  elif [ "${1}" == "(G)" ]; then
+    priority="${GREEN}${1}${RESET}"
+  elif [ "${1}" == "(Z)" ]; then
+    priority="${BOLD}${BLACK}${1}${RESET}"
+  elif [ "${1}" == "(_)" ] || [ "${1}" == "(~)" ]; then
+    priority=""
+  else
+    priority="${BOLD}${1}${RESET}"
+  fi
+
+  printf "%b" "$priority"
+}
+
+function highlight_description() {
+  local result=""
+  read -ra words <<<"$1"
+  for word in "${words[@]}"; do
+    if [ "${word:0:1}" == "+" ]; then
+      result="$result${BLUE}${word}${RESET} "
+    elif [ "${word:0:1}" == "@" ]; then
+      result="$result${YELLOW}${word}${RESET} "
+    elif [[ "${word}" = *:* ]]; then
+      result="$result${CYAN}${word}${RESET} "
+    elif [[ "${word}" =~ ^\(([A-Z_])\)$ ]]; then
+      if [ "${BASH_REMATCH[1]}" == "A" ]; then
+        result="$result${BOLD}${RED}${word}${RESET} "
+      elif [ "${BASH_REMATCH[1]}" == "B" ]; then
+        result="$result${RED}${word}${RESET} "
+      elif [ "${BASH_REMATCH[1]}" == "C" ]; then
+        result="$result${YELLOW}${word}${RESET} "
+      elif [ "${BASH_REMATCH[1]}" == "D" ]; then
+        result="$result${MAGENTA}${word}${RESET} "
+      elif [ "${BASH_REMATCH[1]}" == "E" ]; then
+        result="$result${BLUE}${word}${RESET} "
+      elif [ "${BASH_REMATCH[1]}" == "F" ]; then
+        result="$result${CYAN}${word}${RESET} "
+      elif [ "${BASH_REMATCH[1]}" == "G" ]; then
+        result="$result${GREEN}${word}${RESET} "
+      elif [ "${BASH_REMATCH[1]}" == "Z" ]; then
+        result="$result${BOLD}${BLACK}${word}${RESET} "
+      elif ! [ "${BASH_REMATCH[1]}" == "_" ]; then
+        result="$result${BOLD}${word}${RESET} "
+      fi
+    elif [[ "${word}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+      result="$result${MAGENTA}${word}${RESET} "
+    elif [ "$2" == "(A)" ]; then
+      result="$result${RED}${word}${RESET} "
+    else
+      result="$result${word} "
+    fi
+  done
+  printf "%b" "${result% }"
+}
+
+function highlight_row() {
+  local task="$1"
+  
+  if [[ "$task" =~ ^([^\;]*)\;([^\;]*)\;([^\;]*)\;([^\;]*)\;([^\;]*)\;([^\;]*)\;([^\;]*)\;([^\;]*)\;([^\;]*)$ ]]; then
+    printf "%s;%b;%b;%b;%b;%b;%b;%b;%b\n" \
+      "${BASH_REMATCH[1]}" \
+      "${BOLD}${BLACK}${BASH_REMATCH[2]}${RESET}" \
+      "$(highlight_priority "${BASH_REMATCH[3]}")" \
+      "${MAGENTA}${BASH_REMATCH[4]}${RESET}" \
+      "${MAGENTA}${BASH_REMATCH[5]}${RESET}" \
+      "${CYAN}${BASH_REMATCH[6]}${CYAN}" \
+      "${YELLOW}${BASH_REMATCH[7]}${RESET}" \
+      "${BLUE}${BASH_REMATCH[8]}${RESET}" \
+      "$(highlight_description "${BASH_REMATCH[9]}" "${BASH_REMATCH[3]}")"
+  fi
+}
+
+function highlight_task() {
+  local task="$1"
+
+  if [ "${task:0:1}" == "x" ]; then
+    printf "%b%s%b" "${BOLD}${BLACK}" "$task" "${RESET}"
+  else
+    highlight_description "$task"
+  fi
+}
+
+function parse_task() {
+  local id="$1"
+  local task="$2"
+
+  local complete=""
+  local done_date=""
+  local created_date=""
+  local due_date=""
+  local tags=""
+  local projects=""
+  local priority="(_)"
+  local description=""
+
+  if [ "${task:0:1}" == "x" ]; then
+    task="${task#x }"
+    complete="X"
+  fi
+
+
+  read -ra words <<<"$task"
+  for word in "${words[@]}"; do 
+    if [ "${word:0:1}" == "+" ]; then
+      projects="$projects${word} "
+    elif [ "${word:0:1}" == "@" ]; then
+      tags="$tags${word} "
+    elif [[ "${word}" = due:* ]]; then
+      due_date="${word##due:}"
+    elif [[ "${word}" =~ ^\(([A-Z])\)$ ]]; then
+      priority="${word}"
+    elif [[ "${word}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+      if [ -z "$created_date" ]; then
+        created_date="${word}"
+      elif [ -z "$done_date" ]; then
+        done_date="${created_date}"
+        created_date="${word}"
+      else
+        description="$description${word} "
+      fi
+    else
+      description="$description${word} "
+    fi
+  done
+
+  if [ -n "$complete" ] && [ "$priority" == "(_)" ]; then
+    priority="(~)"
+  fi
+
+  printf "%d;%s;%s;%s;%s;%s;%s;%s;%s" "$id" "$complete" "$priority" "$done_date" "$created_date" "$due_date" "${tags% }" "${projects% }" "${description% }"
+}
+
+function find_task() {
+  local id="$1"
+  local open_file="$2"
+  local done_file="$3"
+
+  local task="$(sed "${id}q;d" "$open_file")"
+  if [ -n "$task" ]; then
+    echo "$id:$open_file"
+  elif [ -f "$done_file" ]; then
+    local open_count="$(wc -l < "$open_file")"
+    local nid="$((id - open_count))"
+    task="$(sed "${nid}q;d" "$done_file")" 
+    if [ -n "$task" ]; then
+      echo "$nid:$done_file"
+    else
+      printf "%bNo task with id '%d', it will be skipped%b\n" "$YELLOW" "$id" "$RESET" 1>&2
+    fi
+  else
+    printf "%bNo task with id '%d', it will be skipped%b\n" "$YELLOW" "$id" "$RESET" 1>&2
+  fi
+}
+
+# }}}
+# --- Commands --- {{{
+
+function add() {
+  task="$(date +%Y-%m-%d)"
+  for word in "${_arg_add_description[@]}"; do
+    if [ "${word::4}" == "due:" ]; then
+      task="$task due:$(pdate "${word:4}" "due")"
+    else
+      task="$task $word"
+    fi
+  done
+  if [ -n "$_arg_add_priority" ]; then
+    task="($_arg_add_priority) $task"
+  fi
+  for tag in "${_arg_add_tag[@]}"; do
+    task="$task @$tag"
+  done
+  for proj in "${_arg_add_project[@]}"; do
+    task="$task +$proj"
+  done
+  if [ -n "$_arg_add_due" ]; then
+    task="$task due:$_arg_add_due"
+  fi
+
+  if ! [ -d "$TODO_DIR" ]; then
+    mkdir -p "$TODO_DIR"
+  fi
+  if ! [ -f "$TODO_DIR/todo.txt" ]; then
+    touch "$TODO_DIR/todo.txt"
+  fi
+  echo "$task" >>"$TODO_DIR/todo.txt"
+  echo "Created new task: $(highlight_task "$task")"
+}
+
+function delete() {
+  IFS=$'\n' sorted=($(sort -r <<<"${_arg_delete_id[*]}")); unset IFS
+
+  for id in "${sorted[@]}"; do
+    match="$(find_task "$id" "$TODO_DIR/todo.txt" "$TODO_DIR/done.txt")"
+    if [ -z "$match" ]; then
+      continue
+    fi
+    task="$(sed "${match%%:*}q;d" "${match##*:}")"
+    if [ "$_arg_delete_force" == true ] || confirm "Are you sure you want to delete $(highlight_task "$task") "; then
+      sed -i "${match%%:*}d" "${match##*:}"
+      echo "Deleted task: $(highlight_task "$task")"
+    fi
+  done
+}
+
+function done() {
+  if ! [ -d "$TODO_DIR" ]; then
+    mkdir -p "$TODO_DIR"
+  fi
+  if ! [ -f "$TODO_DIR/done.txt" ]; then
+    touch "$TODO_DIR/done.txt"
+  fi
+
+  complete_date="$(date +%Y-%m-%d)"
+
+  IFS=$'\n' sorted=($(sort -r <<<"${_arg_done_id[*]}")); unset IFS
+
+  for id in "${sorted[@]}"; do
+    match="$(find_task "$id" "$TODO_DIR/todo.txt" "$TODO_DIR/done.txt")"
+    if [ -z "$match" ]; then
+      continue
+    fi
+    task="$(sed "${match%%:*}q;d" "${match##*:}")"
+
+    if [ "${task:0:1}" == "x" ] && [ "$_arg_done_undo" == false ]; then
+      printf "%bTask '%d' is already marked as completed, nothing to do %b\n" "$YELLOW" "${match%%:*}" "$RESET"
+      continue
+    elif ! [ "${task:0:1}" == "x" ] && [ "$_arg_done_undo" == true ]; then
+      printf "%bTask '%d' is already marked as open, nothing to do %b\n" "$YELLOW" "${match%%:*}" "$RESET"
+      continue
+    fi
+
+    if [ "$_arg_done_move" == true ]; then
+      source="${match##*:}"
+      if [ "$_arg_done_undo" == true ]; then
+        if [ "$source" == "$TODO_DIR/todo.txt" ]; then
+          sed -i -E "${match%%:*} s/^x (\([A-Z]\) )?([0-9]{4}-[0-9]{2}-[0-9]{2} )(.*)/\1\3/" "$source"
+        else
+          printf "%s\n" "$task" | sed -E "s/^x (\([A-Z]\) )?([0-9]{4}-[0-9]{2}-[0-9]{2} )(.*)/\1\3/" >> "$TODO_DIR/todo.txt"
+          sed -i "${match%%:*}d" "$TODO_DIR/done.txt"
+        fi
+        echo "Re opened task: $(highlight_task "$task")"
+      else
+        if [ "$source" == "$TODO_DIR/todo.txt" ]; then
+          printf "%s\n" "$task" | sed -E "s/^(\([A-Z]\) )?(.*)/x \1${complete_date} \2/" >> "$TODO_DIR/done.txt"
+          sed -i "${match%%:*}d" "$TODO_DIR/todo.txt"
+        else
+          sed -i -E "${match%%:*} s/^(\([A-Z]\) )?(.*)/x \1${complete_date} \2/" "$source"
+        fi
+        echo "Completed task: $(highlight_task "$task")"
+      fi
+    else
+      if [ "$_arg_done_undo" == true ]; then
+        sed -i -E "${match%%:*} s/^x (\([A-Z]\) )?([0-9]{4}-[0-9]{2}-[0-9]{2})(.*)/\1\3/" "${match##*:}"
+        echo "Re opened task: $(highlight_task "$task")"
+      else
+        sed -i -E "${match%%:*} s/^(\([A-Z]\) )?(.*)/x \1${complete_date} \2/" "${match##*:}"
+        echo "Completed task: $(highlight_task "$task")"
+      fi
+    fi
+  done
+}
+
+function edit() {
+
+  if [ "$_arg_edit_done" == false ]; then
+    "${EDITOR:-nano}" "$TODO_DIR/todo.txt" 
+  else
+    "${EDITOR:-nano}" "$TODO_DIR/done.txt" 
+  fi
+}
+
+function list() {
+
+  raw_list=""
+  if [ -f "$TODO_DIR/todo.txt" ]; then
+    if [ -n "${_arg_list_query[*]}" ]; then
+      raw_list="$(grep "${_arg_list_query[*]}" "$TODO_DIR/todo.txt")"
+    else
+      raw_list="$(cat "$TODO_DIR/todo.txt")"
+    fi
+  fi
+
+  if [ "$_arg_list_all" == true ] && [ -f "$TODO_DIR/done.txt" ]; then
+    if [ -n "${_arg_list_query[*]}" ]; then
+      raw_list="$raw_list\n$(grep "${_arg_list_query[*]}" "$TODO_DIR/done.txt")"
+    else
+      raw_list="$raw_list\n$(cat "$TODO_DIR/done.txt")"
+    fi
+  fi
+  raw_list="$(echo -e "$raw_list")"
+
+  raw_table=""
+  idx=1
+  while IFS= read -r line; do
+    raw_table="$raw_table$(parse_task "$idx" "$line")\n"
+    idx=$((idx+1))
+  done < <(printf '%s\n' "$raw_list")
+
+  raw_table="$(printf "%b" "$raw_table" | LC_ALL=c sort -fbt';' -k3.1)"
+
+  table=""
+  headers="$(printf "%bId%b,%bS%b,%bPri%b,%bDone%b,%bCreated%b,%bDue%b,%bTags%b,%bProjects%b,%bDescription%b" "$BOLD" "$RESET" "$BOLD" "$RESET" "$BOLD" "$RESET" "$BOLD" "$RESET" "$BOLD" "$RESET" "$BOLD" "$RESET" "$BOLD" "$RESET" "$BOLD" "$RESET" "$BOLD" "$RESET")"
+  while IFS= read -r row; do
+    table="$table$(highlight_row "$row")\n"
+  done < <(printf '%b\n' "$raw_table")
+
+  if ! [ "$_arg_list_all" == true ]; then
+    table="$(printf "%b" "$table" | cut -d';' -f2,4 --complement)"
+    headers="$(echo "$headers" | cut -d',' -f2,4 --complement)"
+  fi
+
+  printf "%b" "$table" | column -ts";" -R 1 -N "$headers"
 }
 
 # }}}
 
 parse_args "$@"
+
+if [ -n "$_arg_command" ]; then
+  "$_arg_command"
+  exit $?
+else
+  list
+  exit $?
+fi
