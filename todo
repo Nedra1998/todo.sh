@@ -20,6 +20,7 @@ if [ -t 1 ] && [ -z "${NO_COLOR+x}" ]; then
   MAGENTA="\e[35m"
   CYAN="\e[36m"
   WHITE="\e[37m"
+  BRIGHT_BLACK="\e[90m"
 else
   RESET=""
   BOLD=""
@@ -31,6 +32,7 @@ else
   MAGENTA=""
   CYAN=""
   WHITE=""
+  BRIGHT_BLACK=""
 fi
 
 # }}}
@@ -49,7 +51,7 @@ fi
 SED="sed"
 if sed --version &>/dev/null; then
   SED="sed"
-elif ! command -v gsed&>/dev/null; then
+elif ! command -v gsed &>/dev/null; then
   SED="gsed"
 else
   printf "%bGNU %bsed%b is required for %s" "$RED" "$CYAN" "$RED" "$0"
@@ -61,6 +63,16 @@ if column --version &>/dev/null; then
   COLUMN="column"
 else
   printf "%butil-linux %bcolumn%b is required for %s" "$RED" "$CYAN" "$RED" "$0"
+  exit 1
+fi
+
+DATE="date"
+if date --version &>/dev/null; then
+  DATE="date"
+elif ! command -v gdate &>/dev/null; then
+  DATE="gdate"
+else
+  printf "%bGNU %bdate%b is required for %s" "$RED" "$CYAN" "$RED" "$0"
   exit 1
 fi
 
@@ -648,7 +660,7 @@ function highlight_description() {
 
 function highlight_row() {
   local task="$1"
-  
+
   if [[ "$task" =~ ^([^\;]*)\;([^\;]*)\;([^\;]*)\;([^\;]*)\;([^\;]*)\;([^\;]*)\;([^\;]*)\;([^\;]*)\;([^\;]*)$ ]]; then
     printf "%s;%b;%b;%b;%b;%b;%b;%b;%b\n" \
       "${BASH_REMATCH[1]}" \
@@ -691,9 +703,8 @@ function parse_task() {
     complete="X"
   fi
 
-
   read -ra words <<<"$task"
-  for word in "${words[@]}"; do 
+  for word in "${words[@]}"; do
     if [ "${word:0:1}" == "+" ]; then
       projects="$projects${word} "
     elif [ "${word:0:1}" == "@" ]; then
@@ -732,9 +743,9 @@ function find_task() {
   if [ -n "$task" ]; then
     echo "$id:$open_file"
   elif [ -f "$done_file" ]; then
-    local open_count="$(wc -l < "$open_file")"
+    local open_count="$(wc -l <"$open_file")"
     local nid="$((id - open_count))"
-    task="$("$SED" "${nid}q;d" "$done_file")" 
+    task="$("$SED" "${nid}q;d" "$done_file")"
     if [ -n "$task" ]; then
       echo "$nid:$done_file"
     else
@@ -781,7 +792,8 @@ function add() {
 }
 
 function delete() {
-  IFS=$'\n' sorted=($(sort -r <<<"${_arg_delete_id[*]}")); unset IFS
+  IFS=$'\n' sorted=($(sort -r <<<"${_arg_delete_id[*]}"))
+  unset IFS
 
   for id in "${sorted[@]}"; do
     match="$(find_task "$id" "$TODO_DIR/todo.txt" "$TODO_DIR/done.txt")"
@@ -806,7 +818,8 @@ function done() {
 
   complete_date="$(date +%Y-%m-%d)"
 
-  IFS=$'\n' sorted=($(sort -r <<<"${_arg_done_id[*]}")); unset IFS
+  IFS=$'\n' sorted=($(sort -r <<<"${_arg_done_id[*]}"))
+  unset IFS
 
   for id in "${sorted[@]}"; do
     match="$(find_task "$id" "$TODO_DIR/todo.txt" "$TODO_DIR/done.txt")"
@@ -829,13 +842,13 @@ function done() {
         if [ "$source" == "$TODO_DIR/todo.txt" ]; then
           "$SED" -i -E "${match%%:*} s/^x (\([A-Z]\) )?([0-9]{4}-[0-9]{2}-[0-9]{2} )(.*)/\1\3/" "$source"
         else
-          printf "%s\n" "$task" | "$SED" -E "s/^x (\([A-Z]\) )?([0-9]{4}-[0-9]{2}-[0-9]{2} )(.*)/\1\3/" >> "$TODO_DIR/todo.txt"
+          printf "%s\n" "$task" | "$SED" -E "s/^x (\([A-Z]\) )?([0-9]{4}-[0-9]{2}-[0-9]{2} )(.*)/\1\3/" >>"$TODO_DIR/todo.txt"
           "$SED" -i "${match%%:*}d" "$TODO_DIR/done.txt"
         fi
         echo "Re opened task: $(highlight_task "$task")"
       else
         if [ "$source" == "$TODO_DIR/todo.txt" ]; then
-          printf "%s\n" "$task" | "$SED" -E "s/^(\([A-Z]\) )?(.*)/x \1${complete_date} \2/" >> "$TODO_DIR/done.txt"
+          printf "%s\n" "$task" | "$SED" -E "s/^(\([A-Z]\) )?(.*)/x \1${complete_date} \2/" >>"$TODO_DIR/done.txt"
           "$SED" -i "${match%%:*}d" "$TODO_DIR/todo.txt"
         else
           "$SED" -i -E "${match%%:*} s/^(\([A-Z]\) )?(.*)/x \1${complete_date} \2/" "$source"
@@ -857,9 +870,9 @@ function done() {
 function edit() {
 
   if [ "$_arg_edit_done" == false ]; then
-    "${EDITOR:-nano}" "$TODO_DIR/todo.txt" 
+    "${EDITOR:-nano}" "$TODO_DIR/todo.txt"
   else
-    "${EDITOR:-nano}" "$TODO_DIR/done.txt" 
+    "${EDITOR:-nano}" "$TODO_DIR/done.txt"
   fi
 }
 
@@ -875,53 +888,189 @@ function graph() {
   fi
   raw_list="$(echo -e "$raw_list")"
 
-  raw_table=""
-  idx=1
+  declare -A data
+  c="$("$DATE" -I -d "$_arg_graph_start - 1 day")"
+  while [ "$c" != "$_arg_graph_end" ]; do
+    c="$("$DATE" -I -d "$c + 1 day")"
+    ts="$("$DATE" -d "$c" +%s)"
+    data["$ts"]="$c;0;0;0"
+  done
+
+  max=0
+
   while IFS= read -r line; do
-    raw_table="$raw_table$(parse_task "$idx" "$line")\n"
-    idx=$((idx+1))
+    task="$(parse_task "0" "$line")"
+    opened="$("$DATE" --date "$(echo "$task" | cut -d';' -f5)" +%s)"
+    closed="$("$DATE" --date "$(echo "$task" | cut -d';' -f4)" +%s)"
+    raw_closed="$(echo "$task" | cut -d';' -f4)"
+
+    for ts in "${!data[@]}"; do
+
+      row="${data["$ts"]}"
+      dt="${row%%;*}"
+      row="${row#*;}"
+      nopened="${row%%;*}"
+      row="${row#*;}"
+      npending="${row%%;*}"
+      row="${row#*;}"
+      nclosed="${row}"
+
+      if [ "$opened" -eq "$ts" ]; then
+        nopened=$((nopened+1))
+      fi
+      if [ -n "$raw_closed" ]; then
+        if [ "$closed" -eq "$ts" ]; then
+          nclosed=$((nclosed+1))
+        fi
+        if [ "$opened" -lt "$ts" ] && [ "$closed" -gt "$ts" ]; then
+          npending=$((npending+1))
+        fi
+      elif [ "$opened" -lt "$ts" ]; then
+          npending=$((npending+1))
+      fi
+
+      data["$ts"]="$dt;$nopened;$npending;$nclosed"
+      if [ $((nopened + npending + nclosed)) -gt "$max" ]; then
+        max=$((nopened + npending + nclosed))
+      fi
+    done
+
   done < <(printf '%s\n' "$raw_list")
 
+  headers="$(printf "%bDate%b,%bO%b,%bP%b,%bC%b,%bBar%b" "$BOLD" "$RESET" "$BOLD" "$RESET" "$BOLD" "$RESET" "$BOLD" "$RESET" "$BOLD" "$RESET")"
+
   table=""
-
-  c="$(date -I -d "$_arg_graph_start - 1 day")"
-  accum=0
-  max=0
-  headers="$(printf "%bDate%b,%bN%b,%bP%b,%bD%b,%bBar%b" "$BOLD" "$RESET" "$BOLD" "$RESET" "$BOLD" "$RESET" "$BOLD" "$RESET" "$BOLD" "$RESET")"
+  c="$("$DATE" -I -d "$_arg_graph_start - 1 day")"
   while [ "$c" != "$_arg_graph_end" ]; do
-    c="$(date -I -d "$c + 1 day")"
+    c="$("$DATE" -I -d "$c + 1 day")"
+    ts="$("$DATE" -d "$c" +%s)"
 
-    closed="$(grep -c -E "^([^\;]*)\;([^\;]*)\;([^\;]*)\;$(date --date "$c" +%Y-%m-%d)\;([^\;]*)\;([^\;]*)\;([^\;]*)\;([^\;]*)\;([^\;]*)$" <(echo -e "$raw_table"))"
-    created="$(grep -c -E "^([^\;]*)\;([^\;]*)\;([^\;]*)\;([^\;]*)\;$(date --date "$c" +%Y-%m-%d)\;([^\;]*)\;([^\;]*)\;([^\;]*)\;([^\;]*)$" <(echo -e "$raw_table"))"
-    accum="$((accum+created-closed))"
+    row="${data["$ts"]}"
+    dt="$(echo "$row" | cut -d';' -f1)"
+    created="$(echo "$row" | cut -d';' -f2)"
+    pending="$(echo "$row" | cut -d';' -f3)"
+    closed="$(echo "$row" | cut -d';' -f4)"
 
+    created_width=$(((created * 40) / max))
+    pending_width=$(((pending * 40) / max))
+    closed_width=$(((closed * 40) / max))
 
-    pending="$((accum-created))"
-    if [ "$pending" -lt 0 ]; then
-      pending=0
-    fi
-
-    row="$(printf "%b%s%b;%b%s%b;%b%s%b;%b%s%b;%b%s%b%b%s%b%b%s%b" \
-            "$BOLD" "$(date --date "$c" +%Y-%m-%d)" "$RESET" \
-            "$RED" "$created" "$RESET" \
-            "$YELLOW" "$pending" "$RESET" \
-            "$GREEN" "$closed" "$RESET" \
-            "$RED" "$(printf "%${created}s" '' | "$SED" 's/ /━/g')" "$RESET" \
-            "$YELLOW" "$(printf "%${pending}s" '' | "$SED" 's/ /━/g')" "$RESET" \
-            "$GREEN" "$(printf "%${closed}s" '' | "$SED" 's/ /━/g')" "$RESET" \
-          )"
-
-    total="$((created+pending+closed))"
-    if [ "$max" -lt "$total" ]; then
-      max="$total"
-    fi
-
-    table="$table$row\n"
+    table="$table$(
+      printf "%b%s%b;%b%s%b;%b%s%b;%b%s%b;%b%s%b%b%s%b%b%s%b" \
+        "$BOLD" "$dt" "$RESET" \
+        "$RED" "$created" "$RESET" \
+        "$BRIGHT_BLACK" "$pending" "$RESET" \
+        "$GREEN" "$closed" "$RESET" \
+        "$BRIGHT_BLACK" "$(printf "%${pending_width}s" '' | "$SED" 's/ /━/g')" "$RESET" \
+        "$GREEN" "$(printf "%${closed_width}s" '' | "$SED" 's/ /━/g')" "$RESET" \
+        "$RED" "$(printf "%${created_width}s" '' | "$SED" 's/ /━/g')" "$RESET"
+    )\n"
   done
 
   printf "%b" "$table" | "$COLUMN" -ts";" -R 1 -N "$headers"
 
 }
+
+# function graph() {
+#
+#   raw_list=""
+#   if [ -f "$TODO_DIR/todo.txt" ]; then
+#     raw_list="$(cat "$TODO_DIR/todo.txt")"
+#   fi
+#
+#   if [ -f "$TODO_DIR/done.txt" ]; then
+#     raw_list="$raw_list\n$(cat "$TODO_DIR/done.txt")"
+#   fi
+#   raw_list="$(echo -e "$raw_list")"
+#
+#   declare -A data
+#   while IFS= read -r line; do
+#     task="$(parse_task "0" "$line")"
+#     created="$("$DATE" --date "$(echo "$task" | cut -d';' -f5)" +%s)"
+#     closed="$("$DATE" --date "$(echo "$task" | cut -d';' -f4)" +%s)"
+#
+#     if [[ -v data["$created"] ]]; then
+#       prev="${data["$created"]}"
+#       count="${prev%%:*}"
+#       data["$created"]="$((count + 1)):${prev##*:}"
+#     else
+#       data[$created]="1:0"
+#     fi
+#
+#     if [ -n "$closed" ]; then
+#       if [[ -v data["$closed"] ]]; then
+#         prev="${data["$closed"]}"
+#         count="${prev##*:}"
+#         data["$closed"]="${prev%%:*}:$((count + 1))"
+#       else
+#         data[$closed]="0:1"
+#       fi
+#     fi
+#   done < <(printf '%s\n' "$raw_list")
+#
+#   IFS=$'\n' earliest=$(sort <<<"${!data[*]}" | head -n1)
+#   unset IFS
+#   pending=0
+#   max=0
+#
+#   raw_table=""
+#   c="$("$DATE" -I -d "$_arg_graph_start - 1 day")"
+#   while [ "$c" != "$_arg_graph_end" ]; do
+#     c="$("$DATE" -I -d "$c + 1 day")"
+#     ts="$("$DATE" -d "$c" +%s)"
+#     if [ "$ts" -lt "$earliest" ]; then
+#       row="$c;0;0;0"
+#     else
+#       if [[ -v data["$ts"] ]]; then
+#         entry="${data["$ts"]}"
+#         opened="${entry%%:*}"
+#         closed="${entry##*:}"
+#         if [ $pending -lt $closed ]; then
+#           pending=0
+#         else
+#           pending=$((pending - closed))
+#         fi
+#         row="$c;$opened;$pending;$closed"
+#         pending=$((pending + opened))
+#         total=$((opened + pending + closed))
+#         if [ "$total" -gt "$max" ]; then max="$total"; fi
+#       else
+#         row="$c;0;$pending;$closed"
+#       fi
+#     fi
+#     raw_table="$raw_table$row\n"
+#   done
+#
+#   headers="$(printf "%bDate%b,%bN%b,%bP%b,%bD%b,%bBar%b" "$BOLD" "$RESET" "$BOLD" "$RESET" "$BOLD" "$RESET" "$BOLD" "$RESET" "$BOLD" "$RESET")"
+#
+#   echo "$max"
+#
+#   table=""
+#   while IFS= read -r row; do
+#     dt="$(echo "$row" | cut -d';' -f1)"
+#     created="$(echo "$row" | cut -d';' -f2)"
+#     pending="$(echo "$row" | cut -d';' -f3)"
+#     closed="$(echo "$row" | cut -d';' -f4)"
+#
+#     created_width=$(((created * 40) / max))
+#     pending_width=$(((pending * 40) / max))
+#     closed_width=$(((closed * 40) / max))
+#
+#     table="$table$(
+#       printf "%b%s%b;%b%s%b;%b%s%b;%b%s%b;%b%s%b%b%s%b%b%s%b" \
+#         "$BOLD" "$dt" "$RESET" \
+#         "$RED" "$created" "$RESET" \
+#         "$BRIGHT_BLACK" "$pending" "$RESET" \
+#         "$GREEN" "$closed" "$RESET" \
+#         "$RED" "$(printf "%${created_width}s" '' | "$SED" 's/ /━/g')" "$RESET" \
+#         "$BRIGHT_BLACK" "$(printf "%${pending_width}s" '' | "$SED" 's/ /━/g')" "$RESET" \
+#         "$GREEN" "$(printf "%${closed_width}s" '' | "$SED" 's/ /━/g')" "$RESET"
+#     )\n"
+#   done < <(printf '%b\n' "$raw_table")
+#
+#   printf "%b" "$table" | "$COLUMN" -ts";" -R 1 -N "$headers"
+#
+# }
 
 function list() {
 
@@ -947,7 +1096,7 @@ function list() {
   idx=1
   while IFS= read -r line; do
     raw_table="$raw_table$(parse_task "$idx" "$line")\n"
-    idx=$((idx+1))
+    idx=$((idx + 1))
   done < <(printf '%s\n' "$raw_list")
 
   raw_table="$(printf "%b" "$raw_table" | LC_ALL=c sort -fbt';' -k3.1)"
