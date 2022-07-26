@@ -7,7 +7,6 @@ TODO_VERSION="0.1.0"
 TODO_DIR="${TODO_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/todo}"
 
 # }}}
-
 # --- Colors --- {{{
 
 if [ -t 1 ] && [ -z "${NO_COLOR+x}" ]; then
@@ -32,6 +31,37 @@ else
   MAGENTA=""
   CYAN=""
   WHITE=""
+fi
+
+# }}}
+# --- GNU Linux Utilities --- {{{
+
+CUT="cut"
+if cut --version &>/dev/null; then
+  CUT="cut"
+elif ! command -v gcut &>/dev/null; then
+  CUT="gcut"
+else
+  printf "%bGNU %bcut%b is required for %s" "$RED" "$CYAN" "$RED" "$0"
+  exit 1
+fi
+
+SED="sed"
+if sed --version &>/dev/null; then
+  SED="sed"
+elif ! command -v gsed&>/dev/null; then
+  SED="gsed"
+else
+  printf "%bGNU %bsed%b is required for %s" "$RED" "$CYAN" "$RED" "$0"
+  exit 1
+fi
+
+COLUMN="column"
+if column --version &>/dev/null; then
+  COLUMN="column"
+else
+  printf "%butil-linux %bcolumn%b is required for %s" "$RED" "$CYAN" "$RED" "$0"
+  exit 1
 fi
 
 # }}}
@@ -698,13 +728,13 @@ function find_task() {
   local open_file="$2"
   local done_file="$3"
 
-  local task="$(sed "${id}q;d" "$open_file")"
+  local task="$("$SED" "${id}q;d" "$open_file")"
   if [ -n "$task" ]; then
     echo "$id:$open_file"
   elif [ -f "$done_file" ]; then
     local open_count="$(wc -l < "$open_file")"
     local nid="$((id - open_count))"
-    task="$(sed "${nid}q;d" "$done_file")" 
+    task="$("$SED" "${nid}q;d" "$done_file")" 
     if [ -n "$task" ]; then
       echo "$nid:$done_file"
     else
@@ -758,9 +788,9 @@ function delete() {
     if [ -z "$match" ]; then
       continue
     fi
-    task="$(sed "${match%%:*}q;d" "${match##*:}")"
+    task="$("$SED" "${match%%:*}q;d" "${match##*:}")"
     if [ "$_arg_delete_force" == true ] || confirm "Are you sure you want to delete $(highlight_task "$task") "; then
-      sed -i "${match%%:*}d" "${match##*:}"
+      "$SED" -i "${match%%:*}d" "${match##*:}"
       echo "Deleted task: $(highlight_task "$task")"
     fi
   done
@@ -783,7 +813,7 @@ function done() {
     if [ -z "$match" ]; then
       continue
     fi
-    task="$(sed "${match%%:*}q;d" "${match##*:}")"
+    task="$("$SED" "${match%%:*}q;d" "${match##*:}")"
 
     if [ "${task:0:1}" == "x" ] && [ "$_arg_done_undo" == false ]; then
       printf "%bTask '%d' is already marked as completed, nothing to do %b\n" "$YELLOW" "${match%%:*}" "$RESET"
@@ -797,27 +827,27 @@ function done() {
       source="${match##*:}"
       if [ "$_arg_done_undo" == true ]; then
         if [ "$source" == "$TODO_DIR/todo.txt" ]; then
-          sed -i -E "${match%%:*} s/^x (\([A-Z]\) )?([0-9]{4}-[0-9]{2}-[0-9]{2} )(.*)/\1\3/" "$source"
+          "$SED" -i -E "${match%%:*} s/^x (\([A-Z]\) )?([0-9]{4}-[0-9]{2}-[0-9]{2} )(.*)/\1\3/" "$source"
         else
-          printf "%s\n" "$task" | sed -E "s/^x (\([A-Z]\) )?([0-9]{4}-[0-9]{2}-[0-9]{2} )(.*)/\1\3/" >> "$TODO_DIR/todo.txt"
-          sed -i "${match%%:*}d" "$TODO_DIR/done.txt"
+          printf "%s\n" "$task" | "$SED" -E "s/^x (\([A-Z]\) )?([0-9]{4}-[0-9]{2}-[0-9]{2} )(.*)/\1\3/" >> "$TODO_DIR/todo.txt"
+          "$SED" -i "${match%%:*}d" "$TODO_DIR/done.txt"
         fi
         echo "Re opened task: $(highlight_task "$task")"
       else
         if [ "$source" == "$TODO_DIR/todo.txt" ]; then
-          printf "%s\n" "$task" | sed -E "s/^(\([A-Z]\) )?(.*)/x \1${complete_date} \2/" >> "$TODO_DIR/done.txt"
-          sed -i "${match%%:*}d" "$TODO_DIR/todo.txt"
+          printf "%s\n" "$task" | "$SED" -E "s/^(\([A-Z]\) )?(.*)/x \1${complete_date} \2/" >> "$TODO_DIR/done.txt"
+          "$SED" -i "${match%%:*}d" "$TODO_DIR/todo.txt"
         else
-          sed -i -E "${match%%:*} s/^(\([A-Z]\) )?(.*)/x \1${complete_date} \2/" "$source"
+          "$SED" -i -E "${match%%:*} s/^(\([A-Z]\) )?(.*)/x \1${complete_date} \2/" "$source"
         fi
         echo "Completed task: $(highlight_task "$task")"
       fi
     else
       if [ "$_arg_done_undo" == true ]; then
-        sed -i -E "${match%%:*} s/^x (\([A-Z]\) )?([0-9]{4}-[0-9]{2}-[0-9]{2})(.*)/\1\3/" "${match##*:}"
+        "$SED" -i -E "${match%%:*} s/^x (\([A-Z]\) )?([0-9]{4}-[0-9]{2}-[0-9]{2})(.*)/\1\3/" "${match##*:}"
         echo "Re opened task: $(highlight_task "$task")"
       else
-        sed -i -E "${match%%:*} s/^(\([A-Z]\) )?(.*)/x \1${complete_date} \2/" "${match##*:}"
+        "$SED" -i -E "${match%%:*} s/^(\([A-Z]\) )?(.*)/x \1${complete_date} \2/" "${match##*:}"
         echo "Completed task: $(highlight_task "$task")"
       fi
     fi
@@ -876,9 +906,9 @@ function graph() {
             "$RED" "$created" "$RESET" \
             "$YELLOW" "$pending" "$RESET" \
             "$GREEN" "$closed" "$RESET" \
-            "$RED" "$(printf "%${created}s" '' | sed 's/ /━/g')" "$RESET" \
-            "$YELLOW" "$(printf "%${pending}s" '' | sed 's/ /━/g')" "$RESET" \
-            "$GREEN" "$(printf "%${closed}s" '' | sed 's/ /━/g')" "$RESET" \
+            "$RED" "$(printf "%${created}s" '' | "$SED" 's/ /━/g')" "$RESET" \
+            "$YELLOW" "$(printf "%${pending}s" '' | "$SED" 's/ /━/g')" "$RESET" \
+            "$GREEN" "$(printf "%${closed}s" '' | "$SED" 's/ /━/g')" "$RESET" \
           )"
 
     total="$((created+pending+closed))"
@@ -889,7 +919,7 @@ function graph() {
     table="$table$row\n"
   done
 
-  printf "%b" "$table" | column -ts";" -R 1 -N "$headers"
+  printf "%b" "$table" | "$COLUMN" -ts";" -R 1 -N "$headers"
 
 }
 
@@ -929,11 +959,11 @@ function list() {
   done < <(printf '%b\n' "$raw_table")
 
   if ! [ "$_arg_list_all" == true ]; then
-    table="$(printf "%b" "$table" | cut -d';' -f2,4 --complement)"
-    headers="$(echo "$headers" | cut -d',' -f2,4 --complement)"
+    table="$(printf "%b" "$table" | "$CUT" -d';' -f2,4 --complement)"
+    headers="$(echo "$headers" | "$CUT" -d',' -f2,4 --complement)"
   fi
 
-  printf "%b" "$table" | column -ts";" -R 1 -N "$headers"
+  printf "%b" "$table" | "$COLUMN" -ts";" -R 1 -N "$headers"
 }
 
 # }}}
