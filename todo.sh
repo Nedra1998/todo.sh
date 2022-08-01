@@ -134,7 +134,7 @@ function fmt_state() {
 }
 
 function fmt_urgency() {
-  if [ "$1" -gt 0 ]; then
+  if [ "$1" -ge 0 ]; then
     printf "%b%s%b" "$(cmap "$((100 - $1))" 100 "${CMAP[@]}")" "$(printf "%02d" "$1" | sed -e 's/.$/.&/;t' -e 's/.$/.0&/')" "${RESET}"
   fi
 }
@@ -472,9 +472,9 @@ function todo_version() {
 
 function todo_help() {
   COMMANDS=()
-  if [ -d "$SCRIPT_DIR/todo" ]; then
-    for file in "$SCRIPT_DIR"/todo/*.sh; do
-      if [ "$file" = "$SCRIPT_DIR/todo/*.sh" ]; then continue; fi
+  if [ -d "$SCRIPT_DIR/extensions" ]; then
+    for file in "$SCRIPT_DIR"/extensions/*.sh; do
+      if [ "$file" = "$SCRIPT_DIR/extensions/*.sh" ]; then continue; fi
       local cmd="$(basename "${file%.sh}")"
       source "$file"
       COMMANDS+=("$cmd;$("todo_short_${cmd}")")
@@ -580,9 +580,9 @@ function todo_parse() {
       break
       ;;
     *)
-      if [ -f "$SCRIPT_DIR/todo/$key.sh" ]; then
+      if [ -f "$SCRIPT_DIR/extensions/$key.sh" ]; then
         _arg_command="$key"
-        source "$SCRIPT_DIR/todo/$key.sh"
+        source "$SCRIPT_DIR/extensions/$key.sh"
         shift
         "todo_parse_$key" "$@"
         break
