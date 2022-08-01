@@ -89,9 +89,8 @@ fi
 # --- Task Formatting --- {{{
 
 CMAP=("${BOLD}${RED}" "${RED}" "${YELLOW}" "${MAGENTA}" "${BLUE}" "${CYAN}" "${GREEN}" "${BLACK}")
-STATE_CMAP=("${BLUE}" "${CYAN}" "${RED}" "${YELLOW}" "${GREEN}")
-DONE_COLOR="${BLACK}"
 
+DONE_COLOR="${BLACK}"
 DATE_COLOR="${MAGENTA}"
 PROJECT_COLOR="${BLUE}"
 TAG_COLOR="${YELLOW}"
@@ -102,6 +101,10 @@ function cmap() {
   local max="$2"
   shift 2
   local len="$#"
+
+  if [ "$val" -gt "$max" ]; then val="$max"; fi
+  if [ "$val" -lt 0 ]; then val=0; fi
+
   local idx="$(((val * len) / max + 1))"
 
   if [ "$idx" -gt "$len" ]; then
@@ -124,16 +127,16 @@ function color_urg() {
 
 function fmt_state() {
   if [ "$1" == "x" ]; then
-    printf "%bX%b" "${BOLD}${BLACK}" "${RESET}"
-  elif [ -n "$2" ] && grep -q "${2,,}=[0-9]" <<<"$TODO_STATES"; then
-    local state="$(grep -oP "${2,,}=[0-9]" <<<"$TODO_STATES")"
-    printf "%b %b" "$(cmap "${state##*;}" 4 "${STATE_CMAP[@]}")" "${RESET}"
+    printf "%b✖ %b" "${BOLD}${BLACK}" "${RESET}"
+  elif [ -n "$2" ]; then
+    printf "%b● %b" "$YELLOW" "${RESET}"
   fi
 }
 
 function fmt_urgency() {
-  # printf "%02d" "$1" | sed -e 's/.$/.&/;t' -e 's/.$/.0&/'
-  printf "%b%s%b" "$(cmap "$((100 - $1))" 100 "${CMAP[@]}")" "$(printf "%02d" "$1" | sed -e 's/.$/.&/;t' -e 's/.$/.0&/')" "${RESET}"
+  if [ "$1" -gt 0 ]; then
+    printf "%b%s%b" "$(cmap "$((100 - $1))" 100 "${CMAP[@]}")" "$(printf "%02d" "$1" | sed -e 's/.$/.&/;t' -e 's/.$/.0&/')" "${RESET}"
+  fi
 }
 
 function fmt_description() {
@@ -168,7 +171,7 @@ function fmt_task() {
 
     if [ -n "$state" ]; then
       result="${DONE_COLOR}$state "
-      if [ -n "$pri" ]; then result="$result$(pri) "; fi
+      if [ -n "$pri" ]; then result="$result($pri) "; fi
 
       result="$result$done $created $description"
     else
@@ -179,7 +182,7 @@ function fmt_task() {
     fi
   fi
 
-  printf "%b\n" "$result"
+  printf "%b%b\n" "$result" "${RESET}"
 }
 
 # }}}
@@ -223,6 +226,7 @@ function read_task() {
 }
 
 function find_task() {
+  local id="$1"
   local task="$("$SED" "${id}q;d" "$TODO_DIR/todo.txt")"
   if [ -n "$task" ]; then
     echo "$id:$TODO_DIR/todo.txt:$(read_task "$task")"
@@ -274,7 +278,7 @@ function get_tasks() {
 }
 
 function split_task() {
-  if [[ "$1" =~ ^(.)?\;([A-Z])?\;([^\;]*)?\;([^\;]*)\;(.*) ]]; then
+  if [[ "$1" =~ ^(x)?\;([A-Z])?\;([^\;]*)?\;([^\;]*)\;(.*) ]]; then
     eval "state=\"${BASH_REMATCH[1]}\""
     eval "pri=\"${BASH_REMATCH[2]}\""
     eval "done=\"${BASH_REMATCH[3]}\""
@@ -290,6 +294,22 @@ function get_kvp() {
   fi
 }
 
+function set_kvp() {
+  if grep -q "$1:" <<<"${3##*;}"; then
+    sed "s/$1:[^ ]\+/$1:$2/g" <<<"$3"
+  else
+    echo "$3 $1:$2"
+  fi
+}
+
+function remove_kvp() {
+  if grep -q "$1:" <<<"${2##*;}"; then
+    sed "s/$1:[^ ]\+//g" <<<"$2"
+  else
+    printf '%s' "$2"
+  fi
+}
+
 function calc_urgency() {
   local urg=0
   local now="$(date +%s)"
@@ -301,19 +321,29 @@ function calc_urgency() {
     local description="${BASH_REMATCH[5]}"
     created="$("$DATE" --date "$created" +%s)"
 
+    # Priority contributes 0 - 75
     if [ -n "$pri" ]; then
       local ord="$(printf "%d" "'$pri")"
       urg=$((urg + (3 * (90 - ord))))
     fi
 
+    # Due date contributes 0 - 75
     local due="$(get_kvp "due" "$1")"
     if [ -n "$due" ] && [ -z "$state" ]; then
       due="$("$DATE" --date "$due" +%s)"
-      urg=$((urg + ((25 * (now - created) / (due - created)))))
+      due=$((50 * (now - created) / (due - created)))
+      urg=$((urg+due))
+      # if [ $due -gt 75 ]; then urg=$((urg + 75)); else urg=$((urg + due)); fi
     fi
 
+    # Age contributes 0 - 25
     if [ -z "$state" ]; then
-      urg=$((urg + ((now - created) / 86400)))
+      local age=$(((now - created) / 86400))
+      if [ $age -gt 25 ]; then urg=$((urg + 25)); else urg=$((urg + age)); fi
+    fi
+
+    if [ -n "$state" ]; then
+      urg=$((urg - 100))
     fi
 
   fi
@@ -464,7 +494,8 @@ function todo_help() {
     "done;Mark and open task as completed." \
     "edit;Open the todo list in a text editor." \
     "list;List the tasks in the todo list." \
-    "pri;Update the prioritization of a task."
+    "priority;Update the priority of a task." \
+    "state;Set the current state of a task."
 
   if [ "${#COMMANDS[@]}" -ne 0 ]; then
     hsection "Extensions"
@@ -500,10 +531,52 @@ function todo_parse() {
       todo_parse_delete "$@"
       break
       ;;
+    edit)
+      _arg_command="edit"
+      shift
+      todo_parse_edit "$@"
+      break
+      ;;
     ls | list)
       _arg_command="list"
       shift
       todo_parse_list "$@"
+      break
+      ;;
+    lsa | listall)
+      _arg_command="list"
+      shift
+      todo_parse_list "--all" "$@"
+      break
+      ;;
+    depri)
+      _arg_command="priority"
+      shift
+      todo_parse_priority "unset" "$@"
+      break
+      ;;
+    pri | priority)
+      _arg_command="priority"
+      shift
+      todo_parse_priority "$@"
+      break
+      ;;
+    do | done)
+      _arg_command="state"
+      shift
+      todo_parse_state "done" "$@"
+      break
+      ;;
+    udo | undo | undone)
+      _arg_command="state"
+      shift
+      todo_parse_state "open" "$@"
+      break
+      ;;
+    state)
+      _arg_command="state"
+      shift
+      todo_parse_state "$@"
       break
       ;;
     *)
@@ -674,8 +747,6 @@ function todo_add() {
     mkdir -p "$TODO_DIR"
   fi
 
-  echo "$task"
-
   write_task "$task" >>"$TODO_DIR/todo.txt"
   echo "Created new task: $(fmt_task "$task")"
 }
@@ -741,7 +812,7 @@ function todo_parse_delete() {
 }
 
 function todo_delete() {
-  IFS=$'\n' read -r -a sorted <<<"$(sort -r <<<"${_arg_delete_id[*]}")"
+  IFS=$'\n' sorted=($(sort -r <<<"${_arg_delete_id[*]}"))
 
   for id in "${sorted[@]}"; do
     match="$(find_task "$id")"
@@ -758,6 +829,81 @@ function todo_delete() {
     fi
 
   done
+}
+
+# }}}
+# --- Edit Command --- {{{
+
+_arg_edit_done=false
+_arg_edit_editor="${EDITOR:-vi}"
+
+function todo_help_edit() {
+  husage "edit" ""
+  hlong "Open the todo list in an editor."
+  hsection "Options"
+  hoptions \
+    "-h;--help;;Show this help message and exit." \
+    "-d;--done;;Open the list of completed tasks in the editor." \
+    "-e;--editor;EDITOR;Specify the editor to open the list with."
+}
+
+function todo_parse_edit() {
+  while test $# -gt 0; do
+    local key="$1"
+    case "$key" in
+    -h | --help)
+      todo_help_edit
+      exit 0
+      ;;
+    -h*)
+      todo_help_edit
+      exit 0
+      ;;
+    -d | --done)
+      _arg_edit_done=true
+      ;;
+    -d*)
+      _arg_edit_done=true
+      _next="${key##-d}"
+      if [ -n "$_next" ] && [ "$_next" != "$key" ]; then
+        shift
+        set -- "-d" "-${_next}" "$@"
+      fi
+      ;;
+    -e | --editor)
+      if [ $# -lt 2 ]; then
+        printf "%bMissing value for the optional argument '%s'%b\n" "$YELLOW" "$key" "$RESET"
+        exit 1
+      fi
+      _arg_edit_editor="$2"
+      shift
+      ;;
+    --editor=*)
+      _arg_edit_editor="${key##--editor=}"
+      ;;
+    -e*)
+      _arg_edit_editor="${key##-e}"
+      ;;
+    *)
+      todo_help_edit
+      printf "%bGot an unexpected argument '%s'%b\n" "$RED" "$key" "$RESET"
+      exit 1
+      ;;
+    esac
+    shift
+  done
+}
+
+function todo_edit() {
+  if ! [ -d "$TODO_DIR" ]; then mkdir -p "$TODO_DIR"; fi
+
+  if [ "$_arg_edit_done" == false ]; then
+    if ! [ -f "$TODO_DIR/todo.txt" ]; then touch "$TODO_DIR/todo.txt"; fi
+    "$_arg_edit_editor" "$TODO_DIR/todo.txt"
+  else
+    if ! [ -f "$TODO_DIR/done.txt" ]; then touch "$TODO_DIR/done.txt"; fi
+    "$_arg_edit_editor" "$TODO_DIR/done.txt"
+  fi
 }
 
 # }}}
@@ -817,6 +963,11 @@ function todo_parse_list() {
 function todo_list() {
   local tasks="$(get_tasks "${_arg_list_filter[*]}" "$_arg_list_all")"
 
+  if [ -z "$tasks" ]; then
+    printf "%bThere are no tasks in the list!%b\n" "$GREEN" "$RESET"
+    return 0
+  fi
+
   table=""
   while IFS= read -r task; do
     local id="${task%%;*}"
@@ -828,7 +979,7 @@ $(color_pri "$pri")$pri${RESET};\
 ${DATE_COLOR}$done${RESET};\
 ${DATE_COLOR}$created${RESET};\
 ${KVP_COLOR}$(get_kvp "due" "$task")${RESET};\
-$(fmt_description "$description" "due state");\
+$(fmt_description "$description" "due");\
 $(calc_urgency "$task")\n"
   done < <(printf "%b\n" "$tasks")
 
@@ -851,6 +1002,220 @@ ${BOLD}Description${RESET},\
 ${BOLD}Urg${RESET}"
 
   echo -en "$table" | "$COLUMN" -ts';' -N "$(printf "%b" "$headers")"
+}
+
+# }}}
+# --- Priority Command --- {{{
+
+_arg_priority_pri=""
+_arg_priority_id=()
+
+function todo_help_priority() {
+  husage "priority" "PRIORITY ID..."
+  hlong "Update the priority of a task."
+  hsection "Arguments"
+  harguments \
+    "PRIORITY;The new priority of the tasks ('unset' to unset)." \
+    "ID;The IDs of the tasks to be updated."
+  hsection "Options"
+  hoptions \
+    "-h;--help;;Show this help message and exit."
+}
+
+function todo_parse_priority() {
+  while test $# -gt 0; do
+    local key="$1"
+    case "$key" in
+    -h | --help)
+      todo_help_priority
+      exit 0
+      ;;
+    -h*)
+      todo_help_priority
+      exit 0
+      ;;
+    -*)
+      todo_help_priority
+      printf "%bGot an unexpected argument '%s'%b\n" "$RED" "$key" "$RESET"
+      exit 1
+      ;;
+    *)
+      if [ -z "$_arg_priority_pri" ]; then
+        if [ "$key" == "unset" ]; then
+          _arg_priority_pri="$key"
+        else
+          _arg_priority_pri="$(pchar "$key" "PRIORITY")"
+        fi
+      else
+        _arg_priority_id+=("$(pint "$key" "ID")")
+      fi
+      ;;
+    esac
+    shift
+  done
+
+  if [ -z "$_arg_priority_pri" ]; then
+    todo_help_priority
+    printf "%bMissing required argument 'PRIORITY'%b\n" "$RED" "$RESET"
+    exit 1
+  elif [ ${#_arg_priority_id[@]} -eq 0 ]; then
+    todo_help_priority
+    printf "%bMissing required argument 'ID'%b\n" "$RED" "$RESET"
+    exit 1
+  fi
+}
+
+function todo_priority() {
+  IFS=$'\n' sorted=($(sort -r <<<"${_arg_priority_id[*]}"))
+  unset IFS
+
+  if [ "$_arg_priority_pri" == "unset" ]; then
+    _arg_priority_pri=""
+  fi
+
+  for id in "${sorted[@]}"; do
+    match="$(find_task "$id")"
+    if [ -z "$match" ]; then continue; fi
+
+    local id="${match%%:*}"
+    match="${match#*:}"
+    local path="${match%%:*}"
+    local task="${match#*:}"
+
+    if [[ "$task" =~ ^(.)?\;([A-Z])?\;([^\;]*)?\;([^\;]*)\;(.*) ]]; then
+      task="${BASH_REMATCH[1]};$_arg_priority_pri;${BASH_REMATCH[3]};${BASH_REMATCH[4]};${BASH_REMATCH[5]}"
+    fi
+    "$SED" -i "${id} s/^.*$/$(write_task "$task")/" "$path"
+
+    echo "Updated the priority of task: $(fmt_task "$task")"
+
+  done
+}
+
+# }}}
+# --- State Command --- {{{
+
+_arg_state_dest=""
+_arg_state_move=true
+_arg_state_id=()
+
+function todo_help_state() {
+  husage "state" "STATE ID..."
+  hlong "Update the state of a task."
+  hsection "Arguments"
+  harguments \
+    "STATE;The new state of the tasks." \
+    "ID;The IDs of the tasks to be updated."
+  hsection "Options"
+  hoptions \
+    "-h;--help;;Show this help message and exit." \
+    "-M;--no-move;;Don't move completed tasks to the done list."
+}
+
+function todo_parse_state() {
+  while test $# -gt 0; do
+    local key="$1"
+    case "$key" in
+    -h | --help)
+      todo_help_state
+      exit 0
+      ;;
+    -h*)
+      todo_help_state
+      exit 0
+      ;;
+    -M | --no-move)
+      _arg_state_move=false
+      ;;
+    -M*)
+      _arg_state_move=false
+      _next="${key##-M}"
+      if [ -n "$_next" ] && [ "$_next" != "$key" ]; then
+        shift
+        set -- "-M" "-${_next}" "$@"
+      fi
+      ;;
+    -*)
+      todo_help_state
+      printf "%bGot an unexpected argument '%s'%b\n" "$RED" "$key" "$RESET"
+      exit 1
+      ;;
+    *)
+      if [ -z "$_arg_state_dest" ]; then
+        _arg_state_dest="$key"
+      else
+        _arg_state_id+=("$(pint "$key" "ID")")
+      fi
+      ;;
+    esac
+    shift
+  done
+
+  if [ -z "$_arg_state_dest" ]; then
+    todo_help_state
+    printf "%bMissing required argument 'STATE'%b\n" "$RED" "$RESET"
+    exit 1
+  elif [ ${#_arg_state_id[@]} -eq 0 ]; then
+    todo_help_state
+    printf "%bMissing required argument 'ID'%b\n" "$RED" "$RESET"
+    exit 1
+  fi
+}
+
+function todo_state() {
+  IFS=$'\n' sorted=($(sort -r <<<"${_arg_state_id[*]}"))
+  unset IFS
+
+  for id in "${sorted[@]}"; do
+    match="$(find_task "$id")"
+    if [ -z "$match" ]; then continue; fi
+
+    local id="${match%%:*}"
+    match="${match#*:}"
+    local path="${match%%:*}"
+    local task="${match#*:}"
+
+    local task_state="open"
+    if [ "${task:0:1}" == "x" ]; then
+      task_state="done"
+    else
+      local kvp="$(get_kvp "state" "$task")"
+      if [ -n "$kvp" ]; then task_state="$kvp"; fi
+    fi
+
+    if [ "$task_state" == "done" ] && [ "$_arg_state_dest" != "done" ]; then
+      if [[ "$task" =~ ^(.)?\;([A-Z])?\;([^\;]*)?\;([^\;]*)\;(.*) ]]; then
+        task=";${BASH_REMATCH[2]};;${BASH_REMATCH[4]};${BASH_REMATCH[5]}"
+      fi
+    elif [ "$task_state" != "done" ] && [ "$_arg_state_dest" == "done" ]; then
+      if [[ "$task" =~ ^(x)?\;([A-Z])?\;([^\;]*)?\;([^\;]*)\;(.*) ]]; then
+        task="x;${BASH_REMATCH[2]};$(date +%Y-%m-%d);${BASH_REMATCH[4]};${BASH_REMATCH[5]}"
+      fi
+    fi
+
+    if [ "$_arg_state_dest" == "open" ] || [ "$_arg_state_dest" == "done" ]; then
+      task="$(remove_kvp "state" "$task")"
+    else
+      task="$(set_kvp "state" "$_arg_state_dest" "$task")"
+    fi
+
+    local dest=""
+    if [[ "$path" = *done.txt ]] && [ "$_arg_state_dest" != "done" ]; then
+      dest="$TODO_DIR/todo.txt"
+    elif [[ "$path" = *todo.txt ]] && [ "$_arg_state_dest" == "done" ]; then
+      dest="$TODO_DIR/done.txt"
+    fi
+
+    if [ "$_arg_state_move" == true ] && [ -n "$dest" ]; then
+      "$SED" -i "${id}d" "${path}"
+      write_task "$task" >>"$dest"
+    else
+      "$SED" -i "${id} s/^.*$/$(write_task "$task")/" "$path"
+    fi
+
+    echo "Updated the state of task: $(fmt_task "$task")"
+
+  done
 }
 
 # }}}
