@@ -632,7 +632,7 @@ function todo_help_done() {
     help_long "Mark a task(s) as completed."
     help_section "Arguments"
     help_columns \
-        "ID;The task IDs to mark as completed"
+        "ID;The task IDs to mark as completed."
     help_section "Options"
     help_columns \
         "-h;--help;;Show this help message and exit." \
@@ -902,8 +902,6 @@ _arg_metadata_key=""
 _arg_metadata_value=""
 _arg_metadata_id=()
 
-# TODO: Implement special handler for the due key to convert the value to a
-# datetime.
 function todo_help_metadata() {
     help_usage "metadata" "KEY" "[VALUE]" "ID..."
     help_long "Set/Unset a metadata key value pair in a task."
@@ -969,6 +967,8 @@ function todo_parse_metadata() {
     elif [ -z "$_arg_metadata_value" ]; then
         printf "%bMissing required argument 'VALUE'%b\n" "$RED" "$RESET"
         exit 1
+    elif [ "$_arg_metadata_key" == "due" ]; then
+        _arg_metadata_value="$(validate_date "due" "$_arg_metadata_value")"
     fi
 
     if [ ${#_arg_metadata_id[@]} -eq 0 ]; then

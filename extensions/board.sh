@@ -31,10 +31,26 @@ function todo_parse_board() {
             todo_help_board
             exit 0
             ;;
-        *)
+        -c | --columns)
+            if [ $# -lt 2 ]; then
+                printf "%bMissing value for the optional argument '%s'%b\n" "$RED" "$key" "$RESET"
+                exit 1
+            fi
+            _arg_board_columns="$2"
+            ;;
+        --columns=*)
+            _arg_board_columns="${key##--columns=}"
+            ;;
+        -c*)
+            _arg_board_columns="${key##-c}"
+            ;;
+        -*)
             todo_help_board
             printf "%bGot an unexpected argument '%s'%b\n" "$RED" "$key" "$RESET"
             exit 1
+            ;;
+        *)
+            _arg_board_filter+=("$key")
             ;;
         esac
         shift
@@ -64,6 +80,9 @@ function todo_board() {
         lines="$(wc -l <<<"$tasks")"
         if [ "$lines" -gt "$max_lines" ]; then
             max_lines="$lines"
+        elif [ -z "$tasks" ]; then
+            data+=("")
+            continue
         fi
 
         data+=("$(echo "$tasks" | awk -F';' '''
