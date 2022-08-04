@@ -286,6 +286,15 @@ function todo_help_main() {
         done
     fi
 
+    if [ -d "$SCRIPT_DIR/extensions" ]; then
+        for file in "$SCRIPT_DIR"/extensions/*.sh; do
+            if [ "$file" = "$SCRIPT_DIR/extensions/*.sh" ]; then continue; fi
+            local cmd="$(basename "${file%.sh}")"
+            source "$file"
+            extensions+=("$cmd;$("todo_short_${cmd}")")
+        done
+    fi
+
     help_usage "" "COMMAND..."
     help_long "An extensiable personal todo list manager."
     help_section "Options"
@@ -362,6 +371,14 @@ function todo_parse_main() {
             if [ -f "$TODO_DATA_DIR/extensions/$key.sh" ]; then
                 source "$TODO_DATA_DIR/extensions/$key.sh"
                 _arg_command="$key"
+                shift
+                "todo_parse_$key" "$@"
+                break
+            fi
+            if [ -f "$SCRIPT_DIR/extensions/$key.sh" ]; then
+                source "$SCRIPT_DIR/extensions/$key.sh"
+                _arg_command="$key"
+                shift
                 "todo_parse_$key" "$@"
                 break
             fi
@@ -763,7 +780,7 @@ _arg_list_all=false
 _arg_list_filter=()
 
 function todo_help_list() {
-    help_usage "list" "FILTER..."
+    help_usage "list" "[FILTER...]"
     help_long "List tasks in the todo lists."
     help_section "Arguments"
     help_columns \
@@ -885,6 +902,8 @@ _arg_metadata_key=""
 _arg_metadata_value=""
 _arg_metadata_id=()
 
+# TODO: Implement special handler for the due key to convert the value to a
+# datetime.
 function todo_help_metadata() {
     help_usage "metadata" "KEY" "[VALUE]" "ID..."
     help_long "Set/Unset a metadata key value pair in a task."
